@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+APP_DIR=${APP_DIR:-}; PORT=${CLIPROXY_PORT:-}
+fail(){ echo "ERROR: $*" >&2; exit 1; }
+find_rows(){ for d in /opt/* /root/*; do [[ -d "$d/.git" && -f "$d/docker-compose.yml" ]] || continue; git -C "$d" remote -v 2>/dev/null | grep -qi CLIProxyAPI || continue; p=$(docker compose -f "$d/docker-compose.yml" config --format json 2>/dev/null | grep -oE '"published":"[0-9]+"' | head -1 | grep -oE '[0-9]+' || true); v=$(git -C "$d" rev-parse --short HEAD 2>/dev/null || echo unknown); printf '%s\t%s\t%s\t%s\n' CLIProxyAPI "${p:-unknown}" "$v" "$d"; done; }
+if [[ -z "$APP_DIR" ]]; then [[ -t 0 ]] || fail '非交互模式请设置APP_DIR和CLIPROXY_PORT'; mapfile -t rows < <(find_rows); ((${#rows[@]})) || fail '未发现CLIProxyAPI实例'; echo '编号 项目名称 端口 当前版本 项目目录'; printf '%s\n' "${rows[@]}" | awk -F '\t' '{printf "%d) %s %s %s %s\n",NR,$1,$2,$3,$4}'; read -r -p '选择编号或端口: ' c </dev/tty; row=$(printf '%s\n' "${rows[@]}" | awk -F '\t' -v c="$c" 'NR==c||$2==c{print;exit}'); [[ -n "$row" ]] || fail '未选择实例'; APP_DIR=$(printf '%s' "$row"|cut -f4); PORT=$(printf '%s' "$row"|cut -f2); fi
+cd "$APP_DIR"; [[ -z "$(git status --porcelain)" ]] || fail '工作树有修改'; cp -a config.yaml "config.yaml.backup.$(date +%s)" 2>/dev/null || true; git fetch origin main; git reset --hard origin/main; docker compose up -d --pull always; curl -fsS "http://127.0.0.1:${PORT:-8317}/management.html" >/dev/null

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+APP_DIR=${APP_DIR:-/opt/CLIProxyAPI}
+PORT=${CLIPROXY_PORT:-8317}
+REPO_URL=${REPO_URL:-https://github.com/qingan123/CLIProxyAPI.git}
+fail(){ echo "ERROR: $*" >&2; exit 1; }
+read_tty(){ local v; IFS= read -r -p "$1" v </dev/tty || fail '需要交互终端'; printf '%s' "$v"; }
+read_secret(){ local v; IFS= read -r -s -p "$1" v </dev/tty || fail '需要交互终端'; printf '\n' >/dev/tty; printf '%s' "$v"; }
+[[ $EUID -eq 0 ]] || fail '请使用 root/sudo'; command -v git >/dev/null || fail '缺少 git'; command -v docker >/dev/null || fail '缺少 docker'; docker compose version >/dev/null || fail '需要 Docker Compose v2'
+APP_DIR=$(read_tty "部署目录 [$APP_DIR]: "); APP_DIR=${APP_DIR:-/opt/CLIProxyAPI}; PORT=$(read_tty "端口 [$PORT]: "); PORT=${PORT:-8317}; [[ $PORT =~ ^[0-9]+$ ]] || fail '端口无效'
+secret=$(read_secret '管理 API secret-key（留空自动生成）: '); [[ -n "$secret" ]] || secret=$(openssl rand -hex 32)
+mkdir -p "$APP_DIR"; [[ -z "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]] || fail '目标目录非空'
+git clone --depth 1 --branch main "$REPO_URL" "$APP_DIR"; cd "$APP_DIR"
+cp -n config.example.yaml config.yaml 2>/dev/null || true; mkdir -p auths logs plugins
+python3 - "$PORT" "$secret" <<'PY'
+from pathlib import Path
+import re,sys
+p=Path('config.yaml'); s=p.read_text(); s=re.sub(r'(?m)^port:\s*.*$',f'port: {sys.argv[1]}',s,count=1); s=re.sub(r'(?m)^(\s*secret-key:\s*).*$','\\1'+sys.argv[2],s,count=1); p.write_text(s)
+PY
+unset secret; chmod 600 config.yaml
+docker compose up -d --pull always
+for _ in {1..60}; do curl -fsS "http://127.0.0.1:$PORT/management.html" >/dev/null && exit 0; sleep 1; done
+docker compose logs --tail=100; exit 1
