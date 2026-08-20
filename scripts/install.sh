@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-APP_DIR=${APP_DIR:-/opt/CLIProxyAPI}
+APP_DIR_BASE=${APP_DIR_BASE:-${APP_DIR:-/opt/CLIProxyAPI}}
 PORT=${CLIPROXY_PORT:-8317}
 REPO_URL=${REPO_URL:-https://github.com/qingan123/CLIProxyAPI.git}
 fail(){ echo "ERROR: $*" >&2; exit 1; }
 read_tty(){ local v; IFS= read -r -p "$1" v </dev/tty || fail '需要交互终端'; printf '%s' "$v"; }
 read_secret(){ local v; IFS= read -r -s -p "$1" v </dev/tty || fail '需要交互终端'; printf '\n' >/dev/tty; printf '%s' "$v"; }
 [[ $EUID -eq 0 ]] || fail '请使用 root/sudo'; command -v git >/dev/null || fail '缺少 git'; command -v docker >/dev/null || fail '缺少 docker'; docker compose version >/dev/null || fail '需要 Docker Compose v2'
-APP_DIR=$(read_tty "部署目录 [$APP_DIR]: "); APP_DIR=${APP_DIR:-/opt/CLIProxyAPI}; PORT=$(read_tty "端口 [$PORT]: "); PORT=${PORT:-8317}; [[ $PORT =~ ^[0-9]+$ ]] || fail '端口无效'
+PORT=$(read_tty "端口 [$PORT]: "); PORT=${PORT:-8317}; [[ $PORT =~ ^[0-9]+$ ]] || fail '端口无效'
+APP_DIR="$APP_DIR_BASE"; [[ "$PORT" == 8317 ]] || APP_DIR="${APP_DIR_BASE}-${PORT}"
+printf '安装目录自动设置为: %s\n' "$APP_DIR"
 secret=$(read_secret '管理 API secret-key（留空自动生成）: '); [[ -n "$secret" ]] || secret=$(openssl rand -hex 32)
 if command -v ss >/dev/null 2>&1; then
   for candidate in "$PORT" 8085 1455 54545 51121 11451; do
