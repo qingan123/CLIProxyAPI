@@ -9,6 +9,11 @@ read_secret(){ local v; IFS= read -r -s -p "$1" v </dev/tty || fail '需要交�
 [[ $EUID -eq 0 ]] || fail '请使用 root/sudo'; command -v git >/dev/null || fail '缺少 git'; command -v docker >/dev/null || fail '缺少 docker'; docker compose version >/dev/null || fail '需要 Docker Compose v2'
 APP_DIR=$(read_tty "部署目录 [$APP_DIR]: "); APP_DIR=${APP_DIR:-/opt/CLIProxyAPI}; PORT=$(read_tty "端口 [$PORT]: "); PORT=${PORT:-8317}; [[ $PORT =~ ^[0-9]+$ ]] || fail '端口无效'
 secret=$(read_secret '管理 API secret-key（留空自动生成）: '); [[ -n "$secret" ]] || secret=$(openssl rand -hex 32)
+if command -v ss >/dev/null 2>&1; then
+  for candidate in "$PORT" 8085 1455 54545 51121 11451; do
+    ss -ltn "sport = :$candidate" | grep -q LISTEN && fail "端口 $candidate 已被占用"
+  done
+fi
 mkdir -p "$APP_DIR"; [[ -z "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]] || fail '目标目录非空'
 git clone --depth 1 --branch main "$REPO_URL" "$APP_DIR"; cd "$APP_DIR"
 cp -n config.example.yaml config.yaml 2>/dev/null || true; mkdir -p auths logs plugins
@@ -19,5 +24,6 @@ p=Path('config.yaml'); s=p.read_text(); s=re.sub(r'(?m)^port:\s*.*$',f'port: {sy
 PY
 unset secret; chmod 600 config.yaml
 docker compose up -d --pull always
-for _ in {1..60}; do curl -fsS "http://127.0.0.1:$PORT/management.html" >/dev/null && exit 0; sleep 1; done
-docker compose logs --tail=100; exit 1
+for _ in {1..60}; do curl -fsS "http://127.0.0.1:$PORT/management.html" >/dev/null && break; sleep 1; done
+curl -fsS "http://127.0.0.1:$PORT/management.html" >/dev/null || { docker compose logs --tail=100; exit 1; }
+ip="${PUBLIC_HOST:-$(curl -4fsS --max-time 5 https://api.ipify.org || true)}"; url=${ip:+http://$ip:$PORT/management.html}; [[ -n "$url" ]] || url='公网IP探测失败，请检查安全组/UFW'; printf '部署完成。\n公网管理地址: %s\n本机管理地址: http://127.0.0.1:%s/management.html\n端口: %s（请确认管理端口已对公网放行）\n' "$url" "$PORT" "$PORT"
