@@ -22,10 +22,17 @@ cp -n config.example.yaml config.yaml 2>/dev/null || true; mkdir -p auths logs p
 python3 - "$PORT" "$secret" <<'PY'
 from pathlib import Path
 import re,sys
-p=Path('config.yaml'); s=p.read_text(); s=re.sub(r'(?m)^port:\s*.*$',f'port: {sys.argv[1]}',s,count=1); s=re.sub(r'(?m)^(\s*secret-key:\s*).*$','\\1'+sys.argv[2],s,count=1); p.write_text(s)
+p=Path('config.yaml')
+s=p.read_text()
+s=re.sub(r'(?m)^port:\s*.*$', f'port: {sys.argv[1]}', s, count=1)
+s=re.sub(r'(?m)^(\s*allow-remote:\s*).*$', lambda m: m.group(1)+'true', s, count=1)
+s=re.sub(r'(?m)^(\s*secret-key:\s*).*$', lambda m: m.group(1)+sys.argv[2], s, count=1)
+p.write_text(s)
+Path('auths/management-secret.txt').write_text(sys.argv[2]+'\n', encoding='utf-8')
 PY
-unset secret; chmod 600 config.yaml
+sed -i -E "s/\"[0-9]+:8317\"/\"$PORT:$PORT\"/" docker-compose.yml
+unset secret; chmod 600 config.yaml auths/management-secret.txt
 docker compose up -d --pull always
 for _ in {1..60}; do curl -fsS "http://127.0.0.1:$PORT/management.html" >/dev/null && break; sleep 1; done
 curl -fsS "http://127.0.0.1:$PORT/management.html" >/dev/null || { docker compose logs --tail=100; exit 1; }
-ip="${PUBLIC_HOST:-$(curl -4fsS --max-time 5 https://api.ipify.org || true)}"; url=${ip:+http://$ip:$PORT/management.html}; [[ -n "$url" ]] || url='公网IP探测失败，请检查安全组/UFW'; printf '部署完成。\n公网管理地址: %s\n本机管理地址: http://127.0.0.1:%s/management.html\n端口: %s（请确认管理端口已对公网放行）\n' "$url" "$PORT" "$PORT"
+ip="${PUBLIC_HOST:-$(curl -4fsS --max-time 5 https://api.ipify.org || true)}"; url=${ip:+http://$ip:$PORT/management.html}; [[ -n "$url" ]] || url='公网IP探测失败，请检查安全组/UFW'; printf '部署完成。\n公网管理地址: %s\n本机管理地址: http://127.0.0.1:%s/management.html\n管理Secret保存于: %s/management-secret.txt（权限600）\n端口: %s（远程管理已开启，请妥善保管Secret）\n' "$url" "$PORT" "$APP_DIR" "$PORT"
